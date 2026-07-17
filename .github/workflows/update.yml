@@ -36,8 +36,13 @@ jobs:
 
           # 1. Fetch and pin-verify the signing key.
           curl -fsSL -o "$WORKDIR/key.asc" "$KEY_URL"
-          FPR=$(gpg --show-keys --with-colons "$WORKDIR/key.asc" | awk -F: '$1=="fpr"{print $10}')
-          if ! echo "$FPR" | grep -qx "$PINNED_FPR"; then
+          PUB_COUNT=$(gpg --show-keys --with-colons "$WORKDIR/key.asc" | awk -F: '$1=="pub"' | wc -l)
+          if [ "$PUB_COUNT" -ne 1 ]; then
+            echo "ERROR: key.asc contains $PUB_COUNT public keys, expected exactly 1" >&2
+            exit 1
+          fi
+          FPR=$(gpg --show-keys --with-colons "$WORKDIR/key.asc" | awk -F: '$1=="fpr"{print $10; exit}')
+          if [ "$FPR" != "$PINNED_FPR" ]; then
             echo "ERROR: signing key fingerprint mismatch (got: $FPR, expected: $PINNED_FPR)" >&2
             exit 1
           fi
