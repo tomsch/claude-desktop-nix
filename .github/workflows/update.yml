@@ -1,0 +1,87 @@
+name: Auto Update
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:      # Manual trigger
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Check for updates
+        id: check
+        run: |
+          INDEX_URL="https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64/Packages"
+          INDEX=$(curl -fsSL "$INDEX_URL")
+
+          LATEST=$(echo "$INDEX" | grep '^Version: ' | awk '{print $2}' | sort -V | tail -1)
+          SHA256_HEX=$(echo "$INDEX" | awk -v ver="$LATEST" '
+            $1 == "Version:" { v = $2 }
+            $1 == "SHA256:" && v == ver { print $2; exit }')
+
+          if [ -z "$LATEST" ] || [ -z "$SHA256_HEX" ]; then
+            echo "Could not parse version/hash from apt index" >&2
+            exit 1
+          fi
+
+          CURRENT=$(grep 'version = ' package.nix | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          # shellcheck disable=SC2129
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "sha256_hex=$SHA256_HEX" >> "$GITHUB_OUTPUT"
+
+          if [ "$LATEST" != "$CURRENT" ]; then
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update package
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          VERSION="${{ steps.check.outputs.latest }}"
+          SRI_HASH=$(nix hash convert --to sri --hash-algo sha256 "${{ steps.check.outputs.sha256_hex }}")
+
+          if [[ ! "$SRI_HASH" =~ ^sha256- ]]; then
+            echo "ERROR: Invalid SRI hash: $SRI_HASH"
+            exit 1
+          fi
+
+          sed -i "s/version = \"[^\"]*\"/version = \"$VERSION\"/" package.nix
+          sed -i "s|hash = \"sha256-[^\"]*\"|hash = \"$SRI_HASH\"|" package.nix
+
+          git diff package.nix
+
+      - name: Test build
+        if: steps.check.outputs.needs_update == 'true'
+        run: nix build .#default --accept-flake-config
+
+      - name: Commit and push
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.nix
+          git commit -m "Update claude-desktop to ${{ steps.check.outputs.latest }}"
+          git push
+
+      - name: Create Release
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.check.outputs.latest }}" \
+            --title "claude-desktop ${{ steps.check.outputs.latest }}" \
+            --notes "Updated claude-desktop from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
