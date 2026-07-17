@@ -74,7 +74,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.nix
-          git commit -m "Update claude-desktop to ${{ steps.check.outputs.latest }}"
+          git commit -m "chore: update claude-desktop to ${{ steps.check.outputs.latest }}"
           git push
 
       - name: Create Release
