@@ -2,7 +2,7 @@
 
 Nix package for the **official [Claude Desktop](https://claude.com/download) Linux beta** (Chat, Cowork, and Claude Code Desktop), repackaged from Anthropic's apt repository at `downloads.claude.ai`.
 
-Auto-updated every 6 hours via GitHub Actions — the apt package index provides version and SHA256, each bump is build-tested before release.
+Auto-updated every 6 hours via GitHub Actions — the apt package index provides version and SHA256, each bump is build-tested before release. Updates verify the apt repo's GPG signature (pinned Anthropic key) before bumping.
 
 ## Installation
 

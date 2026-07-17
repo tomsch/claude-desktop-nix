@@ -5,6 +5,10 @@ on:
     - cron: '0 */6 * * *'  # Every 6 hours
   workflow_dispatch:      # Manual trigger
 
+concurrency:
+  group: auto-update
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -21,17 +25,57 @@ jobs:
 
       - name: Check for updates
         id: check
+        env:
+          PINNED_FPR: "31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
         run: |
+          KEY_URL="https://downloads.claude.ai/claude-desktop/key.asc"
+          INRELEASE_URL="https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/InRelease"
           INDEX_URL="https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64/Packages"
-          INDEX=$(curl -fsSL "$INDEX_URL")
 
-          LATEST=$(echo "$INDEX" | grep '^Version: ' | awk '{print $2}' | sort -V | tail -1)
-          SHA256_HEX=$(echo "$INDEX" | awk -v ver="$LATEST" '
+          WORKDIR=$(mktemp -d)
+
+          # 1. Fetch and pin-verify the signing key.
+          curl -fsSL -o "$WORKDIR/key.asc" "$KEY_URL"
+          FPR=$(gpg --show-keys --with-colons "$WORKDIR/key.asc" | awk -F: '$1=="fpr"{print $10}')
+          if ! echo "$FPR" | grep -qx "$PINNED_FPR"; then
+            echo "ERROR: signing key fingerprint mismatch (got: $FPR, expected: $PINNED_FPR)" >&2
+            exit 1
+          fi
+          gpg --dearmor < "$WORKDIR/key.asc" > "$WORKDIR/keyring.gpg"
+
+          # 2. Fetch InRelease and verify its signature against the pinned key.
+          curl -fsSL -o "$WORKDIR/InRelease" "$INRELEASE_URL"
+          if ! gpgv --keyring "$WORKDIR/keyring.gpg" "$WORKDIR/InRelease"; then
+            echo "ERROR: InRelease signature verification failed" >&2
+            exit 1
+          fi
+
+          # 3. Fetch Packages and verify its SHA256 against the signed InRelease.
+          curl -fsSL -o "$WORKDIR/Packages" "$INDEX_URL"
+          EXPECTED_SHA=$(awk '/^SHA256:/{f=1;next} /^[A-Za-z].*:/{f=0} f' "$WORKDIR/InRelease" | awk '$3=="main/binary-amd64/Packages"{print $1}')
+          ACTUAL_SHA=$(sha256sum "$WORKDIR/Packages" | awk '{print $1}')
+          if [ -z "$EXPECTED_SHA" ] || [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo "ERROR: Packages SHA256 mismatch (expected: $EXPECTED_SHA, got: $ACTUAL_SHA)" >&2
+            exit 1
+          fi
+
+          # 4. Only now parse version/hash from the verified Packages file.
+          LATEST=$(grep '^Version: ' "$WORKDIR/Packages" | awk '{print $2}' | sort -V | tail -1)
+          SHA256_HEX=$(awk -v ver="$LATEST" '
             $1 == "Version:" { v = $2 }
-            $1 == "SHA256:" && v == ver { print $2; exit }')
+            $1 == "SHA256:" && v == ver { print $2; exit }' "$WORKDIR/Packages")
 
           if [ -z "$LATEST" ] || [ -z "$SHA256_HEX" ]; then
             echo "Could not parse version/hash from apt index" >&2
+            exit 1
+          fi
+
+          if ! echo "$LATEST" | grep -qE '^[0-9][0-9.]*$'; then
+            echo "ERROR: unexpected version format: $LATEST" >&2
+            exit 1
+          fi
+          if ! echo "$SHA256_HEX" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "ERROR: unexpected sha256 format: $SHA256_HEX" >&2
             exit 1
           fi
 
@@ -48,11 +92,15 @@ jobs:
             echo "needs_update=false" >> "$GITHUB_OUTPUT"
           fi
 
+          rm -rf "$WORKDIR"
+
       - name: Update package
         if: steps.check.outputs.needs_update == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.latest }}
+          SHA256_HEX: ${{ steps.check.outputs.sha256_hex }}
         run: |
-          VERSION="${{ steps.check.outputs.latest }}"
-          SRI_HASH=$(nix hash convert --to sri --hash-algo sha256 "${{ steps.check.outputs.sha256_hex }}")
+          SRI_HASH=$(nix hash convert --to sri --hash-algo sha256 "$SHA256_HEX")
 
           if [[ ! "$SRI_HASH" =~ ^sha256- ]]; then
             echo "ERROR: Invalid SRI hash: $SRI_HASH"
@@ -70,18 +118,22 @@ jobs:
 
       - name: Commit and push
         if: steps.check.outputs.needs_update == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.latest }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.nix
-          git commit -m "chore: update claude-desktop to ${{ steps.check.outputs.latest }}"
+          git commit -m "chore: update claude-desktop to $VERSION"
           git push
 
       - name: Create Release
         if: steps.check.outputs.needs_update == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.latest }}
+          CURRENT: ${{ steps.check.outputs.current }}
         run: |
-          gh release create "v${{ steps.check.outputs.latest }}" \
-            --title "claude-desktop ${{ steps.check.outputs.latest }}" \
-            --notes "Updated claude-desktop from ${{ steps.check.outputs.current }} to ${{ steps.check.outputs.latest }}"
+          gh release create "v$VERSION" \
+            --title "claude-desktop $VERSION" \
+            --notes "Updated claude-desktop from $CURRENT to $VERSION"
