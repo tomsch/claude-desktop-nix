@@ -39,14 +39,14 @@
 
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "claude-desktop";
-  version = "1.37937.0";
+  version = "1.37937.1";
 
   # Offizielle Linux-Beta aus Anthropics apt-Paket-Pool. Der Index unter
   # dists/stable/main/binary-amd64/Packages liefert Version + SHA256 für
   # Updates ohne Prefetch (siehe update.sh).
   src = fetchurl {
     url = "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_${finalAttrs.version}_amd64.deb";
-    hash = "sha256-mc64ggSqtJsTiNZ3P+YCVby4QCzJZOGi12fYHkLwJ5A=";
+    hash = "sha256-ZrvGHdBGS1UMTWOBJSARnoNEtGJUHeRHlzUriRiEL08=";
   };
 
   nativeBuildInputs = [
