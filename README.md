@@ -28,6 +28,8 @@ Unfree is allowed inside this flake's package set — consumers need no extra `a
 
 ## Notes
 
+- Recent releases link the native Claude binding against PipeWire; the package includes its shared library for [autoPatchelfHook](https://nixos.org/manual/nixpkgs/stable/#setup-hook-autopatchelfhook) and runtime loading.
+
 - Wayland-first: the wrapper sets `--ozone-platform=wayland` plus IME/text-input flags (built for niri; works on other wlroots/KDE/GNOME Wayland sessions).
 - `--no-sandbox` is required because Chromium's SUID sandbox cannot work from the Nix store.
 - x86_64-linux only (upstream also ships arm64 — PRs welcome).

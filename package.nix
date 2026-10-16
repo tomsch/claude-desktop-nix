@@ -24,6 +24,7 @@
   nspr,
   nss,
   pango,
+  pipewire,
   libx11,
   libxcomposite,
   libxdamage,
@@ -39,14 +40,14 @@
 
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "claude-desktop";
-  version = "2.9939.4";
+  version = "2.42304.0";
 
   # Offizielle Linux-Beta aus Anthropics apt-Paket-Pool. Der Index unter
   # dists/stable/main/binary-amd64/Packages liefert Version + SHA256 für
   # Updates ohne Prefetch (siehe update.sh).
   src = fetchurl {
     url = "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_${finalAttrs.version}_amd64.deb";
-    hash = "sha256-PP3bI78pEeBeJ7TtOFa455XflGQ7LDW1nesxfPmVvKA=";
+    hash = "sha256-dM0szCnSQWUUTkVcvIcsbMKiSiY7g+c0IOlfiRZtSqQ=";
   };
 
   nativeBuildInputs = [
@@ -75,6 +76,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     nspr
     nss
     pango
+    pipewire # libpipewire-0.3.so.0 for claude-native-binding.node
     libx11
     libxcomposite
     libxdamage
